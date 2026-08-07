@@ -16,6 +16,13 @@ TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
     os.getenv("TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE", 2)
 )
 
+# Maximum number of elements per row the kernel processes in a single block.
+# Rows exceeding this limit are processed in a continuous loop.
+TRITON_MAX_TILE_NUMEL = {
+    "cuda": 2**17,
+    "xpu": 2**14,
+}
+
 
 def check(cond, msg):
     if not cond:
@@ -1956,6 +1963,7 @@ if has_triton():
             crow_indices[..., :-1]: (0, None, -1),
             values: (0, None, None),
         }
+        max_tile = TRITON_MAX_TILE_NUMEL.get(input.device.type, 2**17)
 
         def kernel(grid, *sliced_tensors):
             _bsr_softmax_kernel[grid](
@@ -1963,8 +1971,7 @@ if has_triton():
                 row_block,
                 col_block,
                 max_row_nnz,
-                # Triton's max numel is bounded by 2 ** 17.
-                min(2**17, max_row_nnz),
+                min(max_tile, max_row_nnz),
             )
 
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
